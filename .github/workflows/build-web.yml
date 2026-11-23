@@ -1,0 +1,58 @@
+# Builds the NutriAI web app on every push to "main" and publishes the result
+# to the "web-build" branch. Cloudflare Pages is connected to that branch and
+# puts each new version online automatically (see SETUP.md, "Automatic publishing").
+#
+# No secrets are needed here: the Supabase URL and publishable key are public by
+# design and already in lib/core/config/app_config.dart. AI keys stay in Supabase.
+
+name: Build web app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-web
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Download packages
+        run: flutter pub get
+
+      - name: Unit tests (reported, does not block publishing)
+        run: flutter test
+        continue-on-error: true
+
+      - name: Build the web app
+        run: flutter build web --release
+
+      - name: Publish to the web-build branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web
+          publish_branch: web-build
+          force_orphan: true
+          user_name: github-actions[bot]
+          user_email: github-actions[bot]@users.noreply.github.com
+          commit_message: "Web build"
