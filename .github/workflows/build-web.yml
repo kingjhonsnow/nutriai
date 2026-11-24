@@ -31,6 +31,9 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned so a new Flutter release can never break the build unexpectedly.
+          # To upgrade: change the number, push, and check that the build stays green.
+          flutter-version: 3.50.1
           cache: true
 
       - name: Show Flutter version
