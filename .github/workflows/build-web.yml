@@ -39,8 +39,10 @@ jobs:
       - name: Show Flutter version
         run: flutter --version
 
-      - name: Download packages
-        run: flutter pub get
+      - name: Download packages (newest versions pubspec.yaml allows)
+        # pubspec.lock made on a PC with an older Flutter can lock packages that
+        # do not compile on the Flutter used here, so resolve them fresh.
+        run: flutter pub upgrade
 
       - name: Unit tests (reported, does not block publishing)
         run: flutter test
