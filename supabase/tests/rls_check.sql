@@ -119,10 +119,14 @@ BEGIN
     IF n <> 0 THEN RAISE EXCEPTION 'RLS SELF-TEST FAILED at check 10: Bob updated Alice rows'; END IF;
     passed := passed + 1;
 
-    -- check 11: admin cannot read other users' diaries (privacy)
+    -- check 11: admin can READ users' diaries (activity view, migration 4)
+    --           but can never change them
     PERFORM set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated')::TEXT, TRUE);
     SELECT COUNT(*) INTO n FROM public.food_logs;
-    IF n <> 0 THEN RAISE EXCEPTION 'RLS SELF-TEST FAILED at check 11: admin can read % diary rows of others', n; END IF;
+    IF n < 1 THEN RAISE EXCEPTION 'RLS SELF-TEST FAILED at check 11: admin cannot read users'' diaries (is migration 20261127000004 applied?)'; END IF;
+    UPDATE public.food_logs SET calories = 1;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    IF n <> 0 THEN RAISE EXCEPTION 'RLS SELF-TEST FAILED at check 11: admin changed % diary rows of others', n; END IF;
     passed := passed + 1;
 
     -- check 12: revoking access cuts Alice off immediately

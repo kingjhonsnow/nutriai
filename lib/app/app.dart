@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nutri_ai/app/router.dart';
 import 'package:nutri_ai/core/constants/app_colors.dart';
+import 'package:nutri_ai/core/services/activity_tracker.dart';
 import 'package:nutri_ai/core/theme/app_theme.dart';
 
 class NutriAIApp extends ConsumerWidget {
@@ -18,6 +19,7 @@ class NutriAIApp extends ConsumerWidget {
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
       routerConfig: router,
+      builder: (context, child) => ActivityTracker(child: child ?? const SizedBox.shrink()),
     );
   }
 }

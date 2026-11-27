@@ -4,11 +4,13 @@ import 'package:intl/intl.dart';
 import 'package:nutri_ai/core/constants/app_colors.dart';
 import 'package:nutri_ai/core/constants/app_text_styles.dart';
 import 'package:nutri_ai/data/models/account_info.dart';
+import 'package:nutri_ai/features/admin/data/admin_activity_repository.dart';
 import 'package:nutri_ai/features/admin/providers/admin_provider.dart';
+import 'package:nutri_ai/features/admin/screens/admin_user_detail_screen.dart';
 import 'package:nutri_ai/features/auth/providers/auth_provider.dart';
 
-/// Admin panel: approve or block access, set an access end date, give a
-/// temporary password, delete users. Only reachable for the admin account;
+/// Admin panel: see who uses the app and their data, approve or block access,
+/// set an access end date, give a temporary password, delete users. Only reachable for the admin account;
 /// the database also rejects these actions for anyone else.
 class AdminScreen extends ConsumerStatefulWidget {
   const AdminScreen({super.key});
@@ -18,8 +20,128 @@ class AdminScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminScreenState extends ConsumerState<AdminScreen> {
-  int _tab = 0; // 0 waiting, 1 active, 2 blocked, 3 all
+  int _tab = 0; // 0 waiting, 1 active, 2 blocked, 3 all, 4 used the app today
   final _dateFormat = DateFormat('d MMM yyyy');
+  final _number = NumberFormat('#,##0');
+
+  void _openDetail(AccountInfo a) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AdminUserDetailScreen(account: a)),
+    );
+  }
+
+  String _ago(DateTime t) {
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    if (d.inHours < 24) return '${d.inHours} h ago';
+    if (d.inDays < 7) return '${d.inDays} d ago';
+    return _dateFormat.format(t);
+  }
+
+  String _times(int n) => n == 1 ? '1 time' : '$n times';
+
+  Widget _activityInfo(AdminUserStats? st) {
+    if (st == null) return const SizedBox.shrink();
+    final String line1;
+    if (st.lastSeenAt == null) {
+      line1 = 'Has not opened the app yet';
+    } else if (st.opensToday == 0) {
+      line1 = 'Not opened today · last seen ${_ago(st.lastSeenAt!)}';
+    } else {
+      line1 = 'Opened ${_times(st.opensToday)} today · ${st.minutesToday} min · seen ${_ago(st.lastSeenAt!)}';
+    }
+    final parts = <String>[];
+    if (st.mealsToday > 0) {
+      parts.add('${st.mealsToday} ${st.mealsToday == 1 ? 'food' : 'foods'} logged, ${_number.format(st.caloriesToday)} kcal');
+    }
+    if (st.scansToday > 0) parts.add('${st.scansToday} ${st.scansToday == 1 ? 'scan' : 'scans'}');
+    if (st.waterTodayMl > 0) parts.add('${_number.format(st.waterTodayMl)} ml water');
+    final color = st.opensToday > 0 ? AppColors.success : AppColors.textTertiary;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.circle, size: 8, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(line1, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary)),
+              ),
+            ],
+          ),
+          if (parts.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 14, top: 4),
+              child: Text(
+                'Today: ${parts.join(' · ')}',
+                style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _todaySummary(AdminState admin) {
+    if (admin.stats.isEmpty) return const SizedBox.shrink();
+    final users = admin.accounts
+        .where((a) => !a.isAdmin)
+        .map((a) => admin.stats[a.id])
+        .whereType<AdminUserStats>()
+        .toList();
+    final activeUsers = users.where((s) => s.opensToday > 0).length;
+    final opens = users.fold<int>(0, (sum, s) => sum + s.opensToday);
+    final meals = users.fold<int>(0, (sum, s) => sum + s.mealsToday);
+    final scans = users.fold<int>(0, (sum, s) => sum + s.scansToday);
+
+    Widget stat(String value, String label) => Expanded(
+          child: Column(
+            children: [
+              Text(
+                value,
+                style: AppTextStyles.titleLarge.copyWith(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.labelSmall.copyWith(color: AppColors.textSecondary),
+              ),
+            ],
+          ),
+        );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.surfaceBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Today (your users)',
+            style: AppTextStyles.labelMedium.copyWith(color: AppColors.textSecondary, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              stat('$activeUsers/${users.length}', 'used the app'),
+              stat('$opens', 'app opens'),
+              stat('$meals', 'foods logged'),
+              stat('$scans', 'AI scans'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   void _snack(String? error, String success) {
     if (!mounted) return;
@@ -123,6 +245,15 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
                 subtitle: Text(a.email),
               ),
               const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.insights_rounded, color: AppColors.primary),
+                title: const Text('View activity and data'),
+                subtitle: const Text('App use, foods, progress and AI scans'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openDetail(a);
+                },
+              ),
               if (isSelf)
                 const ListTile(
                   leading: Icon(Icons.info_outline_rounded),
@@ -247,7 +378,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
       child: Column(
         children: [
           ListTile(
-            onTap: () => _showActions(a),
+            onTap: () => _openDetail(a),
             leading: CircleAvatar(
               backgroundColor: AppColors.surfaceLight,
               backgroundImage: a.avatarUrl != null ? NetworkImage(a.avatarUrl!) : null,
@@ -261,8 +392,13 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
               ],
             ),
             subtitle: Text(subtitleParts.join(' · '), style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary)),
-            trailing: const Icon(Icons.more_vert_rounded, color: AppColors.textTertiary),
+            trailing: IconButton(
+              icon: const Icon(Icons.more_vert_rounded, color: AppColors.textTertiary),
+              tooltip: 'Actions',
+              onPressed: () => _showActions(a),
+            ),
           ),
+          _activityInfo(ref.read(adminProvider).stats[a.id]),
           if (a.status == AccountStatus.pending && !a.isAdmin)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -300,14 +436,20 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
   @override
   Widget build(BuildContext context) {
     final admin = ref.watch(adminProvider);
-    final lists = [admin.pending, admin.active, admin.blocked, admin.accounts];
-    final labels = ['Waiting (${admin.pending.length})', 'Active (${admin.active.length})', 'Blocked (${admin.blocked.length})', 'All (${admin.accounts.length})'];
+    final lists = [admin.pending, admin.active, admin.blocked, admin.accounts, admin.activeToday];
+    final labels = [
+      'Waiting (${admin.pending.length})',
+      'Active (${admin.active.length})',
+      'Blocked (${admin.blocked.length})',
+      'All (${admin.accounts.length})',
+      'Used today (${admin.activeToday.length})',
+    ];
     final visible = lists[_tab];
 
     return Scaffold(
       backgroundColor: AppColors.backgroundDark,
       appBar: AppBar(
-        title: const Text('Admin: Access'),
+        title: const Text('Admin'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -322,6 +464,12 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _todaySummary(admin),
+              if (admin.statsError != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(admin.statsError!, style: AppTextStyles.bodySmall.copyWith(color: AppColors.warning)),
+                ),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -350,7 +498,11 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
                   padding: const EdgeInsets.all(32),
                   child: Center(
                     child: Text(
-                      _tab == 0 ? 'Nobody is waiting for approval.' : 'No accounts here.',
+                      _tab == 0
+                          ? 'Nobody is waiting for approval.'
+                          : _tab == 4
+                              ? 'Nobody has opened the app today yet.'
+                              : 'No accounts here.',
                       style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
                     ),
                   ),
@@ -360,7 +512,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
               const SizedBox(height: 12),
               Text(
                 'Share your app link with people. They create an account and appear under "Waiting". '
-                'Nobody can use the app until you approve them.',
+                'Nobody can use the app until you approve them. Tap a person to see their activity '
+                'and data, or the three dots for access actions.',
                 style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
               ),
             ],

@@ -1,5 +1,20 @@
 # What changed (version 1.1.0)
 
+## Update 2026-11-27: admin activity view, iPhone display fix, form messages
+
+* Admin activity view: today's usage on every user card (opens, minutes, foods logged,
+  scans, water, last seen), a "Used today" filter, a "Today" summary, and a detail screen
+  per user with Activity (last 14 days, recent visits), Food (any day, by meal, vs targets),
+  Progress (profile, goal, targets, weight, measurements) and Scans tabs. The admin can
+  read users' data but never change it. New files: `lib/features/admin/data/admin_activity_repository.dart`,
+  `lib/features/admin/screens/admin_user_detail_screen.dart`, `lib/core/services/activity_tracker.dart`.
+* Database: `supabase/migrations/20261127000004_admin_activity.sql` (sessions table, tracking
+  function, admin read access, usage numbers). Self-test: `supabase/tests/activity_check.sql`.
+* iPhone: the page is locked at 100% zoom (Flutter 3.50 allowed zoom up to 5x, so Safari
+  zoomed in on text fields and stayed zoomed, cutting the app off on the right).
+* Forms show errors only after the first submit, then update live while typing; old messages
+  are cleared on every submit.
+
 ## Update 2026-11-23: credit line and automatic publishing
 
 * "Powered by Ahmed Ben Hassen" at the bottom of the launch screen (web loading screen and
