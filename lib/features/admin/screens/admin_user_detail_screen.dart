@@ -42,6 +42,8 @@ String _sourceLabel(String? source) {
     case 'tunisian_table':
     case 'ai_estimate':
       return 'AI scan';
+    case 'package_label':
+      return 'AI scan, pack label';
     default:
       return _pretty(source);
   }

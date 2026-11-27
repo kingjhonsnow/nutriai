@@ -451,7 +451,9 @@ class _FoodRecognitionResultsScreenState
               GestureDetector(
                 onTap: () => _editGrams(item),
                 child: Text(
-                  '${item.estimatedWeightGrams.round()} g ✎',
+                  item.pieceCount != null
+                      ? '${item.estimatedWeightGrams.round()} g · ${item.pieceCount} pcs ✎'
+                      : '${item.estimatedWeightGrams.round()} g ✎',
                   style: AppTextStyles.labelMedium.copyWith(
                     color: AppColors.primary,
                     fontWeight: FontWeight.w700,
@@ -479,23 +481,177 @@ class _FoodRecognitionResultsScreenState
               ),
             ],
           ),
+          if (item.isPackaged) _buildPackSection(item),
         ],
       ),
     );
   }
 
-  Future<void> _editGrams(DetectedFoodItem item) async {
-    final controller = TextEditingController(text: item.estimatedWeightGrams.round().toString());
+  /// Packaged products: pack weight, pieces in the pack, pieces eaten and quick
+  /// shares, so only what was really eaten goes into the diary.
+  Widget _buildPackSection(DetectedFoodItem item) {
+    final notifier = ref.read(foodScannerProvider.notifier);
+    final weight = item.packageWeightG;
+    final pieces = item.piecesPerPackage;
+    final share = (weight != null && weight > 0) ? item.estimatedWeightGrams / weight : null;
+    final pieceWeight = (weight != null && pieces != null && pieces > 0) ? weight / pieces : null;
+    final eaten = item.pieceCount ?? (pieceWeight == null ? null : (item.estimatedWeightGrams / pieceWeight).round());
+
+    Widget infoBox(String label, String value, VoidCallback onTap) {
+      return Expanded(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.surfaceBorder),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: AppTextStyles.labelSmall.copyWith(color: AppColors.textTertiary)),
+                const SizedBox(height: 2),
+                Text(
+                  '$value ✎',
+                  style: AppTextStyles.labelMedium.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget shareChip(String label, double fraction) {
+      final selected = share != null && (share - fraction).abs() < 0.02;
+      return ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        showCheckmark: false,
+        onSelected: weight == null ? null : (_) => notifier.setPackFraction(item.id, fraction),
+        selectedColor: AppColors.primary.withOpacity(0.2),
+        backgroundColor: AppColors.surface,
+        side: BorderSide(color: selected ? AppColors.primary : AppColors.surfaceBorder),
+        labelStyle: AppTextStyles.labelMedium.copyWith(
+          color: selected ? AppColors.primary : AppColors.textSecondary,
+          fontWeight: FontWeight.w700,
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.inventory_2_rounded, size: 16, color: AppColors.accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Packaged product: how much did you eat?',
+                  style: AppTextStyles.labelMedium.copyWith(color: AppColors.textPrimary, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              infoBox('Pack weight', weight == null ? 'add' : '${weight.round()} g', () => _editPackWeight(item)),
+              const SizedBox(width: 8),
+              infoBox('Pieces in pack', pieces == null ? 'add' : '$pieces', () => _editPackPieces(item)),
+            ],
+          ),
+          if (pieces != null && pieceWeight != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Pieces eaten (${pieceWeight.toStringAsFixed(pieceWeight < 10 ? 1 : 0)} g each)',
+                    style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline_rounded),
+                  color: AppColors.primary,
+                  tooltip: 'One piece less',
+                  onPressed: (eaten ?? 0) > 1 ? () => notifier.setItemPieces(item.id, (eaten ?? 1) - 1) : null,
+                ),
+                Text(
+                  '${eaten ?? 0} / $pieces',
+                  style: AppTextStyles.titleSmall.copyWith(color: AppColors.textPrimary, fontWeight: FontWeight.w700),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline_rounded),
+                  color: AppColors.primary,
+                  tooltip: 'One piece more',
+                  onPressed: (eaten ?? 0) < pieces * 5 ? () => notifier.setItemPieces(item.id, (eaten ?? 0) + 1) : null,
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              shareChip('¼', 0.25),
+              shareChip('½', 0.5),
+              shareChip('¾', 0.75),
+              shareChip('Whole pack', 1.0),
+            ],
+          ),
+          if (weight == null || pieces == null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                weight == null
+                    ? 'Add the pack weight (printed on the pack) to count only what you ate.'
+                    : 'Add the number of pieces in the pack to count them one by one.',
+                style: AppTextStyles.labelSmall.copyWith(
+                  color: weight == null ? AppColors.warning : AppColors.textTertiary,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Small number dialog. Returns null when cancelled or invalid.
+  Future<double?> _askNumber({
+    required String title,
+    required String label,
+    String? suffix,
+    double? initial,
+    required double min,
+    required double max,
+    bool whole = false,
+  }) async {
+    final controller = TextEditingController(
+      text: initial == null ? '' : (whole ? initial.round().toString() : _trimNumber(initial)),
+    );
     final value = await showDialog<double>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: Text('Portion of ${item.name}'),
+        title: Text(title),
         content: TextField(
           controller: controller,
           autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Grams', suffixText: 'g'),
+          keyboardType: TextInputType.numberWithOptions(decimal: !whole),
+          decoration: InputDecoration(labelText: label, suffixText: suffix),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -506,15 +662,188 @@ class _FoodRecognitionResultsScreenState
         ],
       ),
     );
+    if (value == null) return null;
+    if (value < min || value > max || (whole && value != value.roundToDouble())) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Enter ${whole ? 'a whole number' : 'a number'} between ${_trimNumber(min)} and ${_trimNumber(max)}.'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return null;
+    }
+    return value;
+  }
+
+  static String _trimNumber(double v) =>
+      v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(1);
+
+  Future<void> _editPackWeight(DetectedFoodItem item) async {
+    final value = await _askNumber(
+      title: 'Pack weight',
+      label: 'Net weight printed on the pack',
+      suffix: 'g',
+      initial: item.packageWeightG,
+      min: 1,
+      max: 5000,
+    );
     if (value == null) return;
-    if (value <= 0 || value > 5000) {
-      if (!mounted) return;
+    ref.read(foodScannerProvider.notifier).updatePackInfo(item.id, packageWeightG: value);
+  }
+
+  Future<void> _editPackPieces(DetectedFoodItem item) async {
+    final value = await _askNumber(
+      title: 'Pieces in the pack',
+      label: 'Biscuits, bars or pieces in the full pack',
+      initial: item.piecesPerPackage?.toDouble(),
+      min: 1,
+      max: 200,
+      whole: true,
+    );
+    if (value == null) return;
+    ref.read(foodScannerProvider.notifier).updatePackInfo(item.id, piecesPerPackage: value.round());
+  }
+
+  /// Portion dialog: in grams, or in pieces (number eaten x weight of one piece).
+  Future<void> _editGrams(DetectedFoodItem item) async {
+    final knownPieceWeight = item.effectivePieceWeightG;
+    final pieceWeightLocked = item.isPackaged && item.piecesPerPackage != null && item.packageWeightG != null;
+    final startCount = item.pieceCount ??
+        (knownPieceWeight != null && knownPieceWeight > 0
+            ? (item.estimatedWeightGrams / knownPieceWeight).round().clamp(1, 1000).toInt()
+            : 1);
+    final gramsCtrl = TextEditingController(text: item.estimatedWeightGrams.round().toString());
+    final countCtrl = TextEditingController(text: startCount.toString());
+    final pieceCtrl = TextEditingController(text: knownPieceWeight == null ? '' : _trimNumber(knownPieceWeight));
+    var byPieces = item.pieceCount != null;
+
+    double? parse(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.').trim());
+
+    final choice = await showDialog<_PortionChoice>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final count = parse(countCtrl);
+          final pieceWeight = pieceWeightLocked ? knownPieceWeight : parse(pieceCtrl);
+          final total = (count != null && pieceWeight != null) ? count * pieceWeight : null;
+          return AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text('Portion of ${item.name}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Grams'),
+                        selected: !byPieces,
+                        showCheckmark: false,
+                        onSelected: (_) => setDialogState(() => byPieces = false),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Pieces'),
+                        selected: byPieces,
+                        showCheckmark: false,
+                        onSelected: (_) => setDialogState(() => byPieces = true),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (!byPieces)
+                    TextField(
+                      controller: gramsCtrl,
+                      autofocus: true,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Grams', suffixText: 'g'),
+                    )
+                  else ...[
+                    TextField(
+                      controller: countCtrl,
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Number of pieces eaten'),
+                      onChanged: (_) => setDialogState(() {}),
+                    ),
+                    const SizedBox(height: 8),
+                    if (pieceWeightLocked)
+                      Text(
+                        '${_trimNumber(knownPieceWeight!)} g per piece (pack weight / pieces in the pack)',
+                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                      )
+                    else
+                      TextField(
+                        controller: pieceCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          labelText: 'Weight of 1 piece',
+                          suffixText: 'g',
+                          helperText: knownPieceWeight != null
+                              ? 'Estimated by the AI. Change it if you know better.'
+                              : 'For example a date is about 8 g, an egg about 50 g.',
+                        ),
+                        onChanged: (_) => setDialogState(() {}),
+                      ),
+                    const SizedBox(height: 12),
+                    Text(
+                      total == null ? 'Total: --' : 'Total: ${total.round()} g',
+                      style: AppTextStyles.titleSmall.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: () {
+                  if (!byPieces) {
+                    final grams = parse(gramsCtrl);
+                    Navigator.pop(ctx, grams == null ? null : _PortionChoice(grams: grams));
+                  } else {
+                    Navigator.pop(
+                      ctx,
+                      (count == null || pieceWeight == null)
+                          ? null
+                          : _PortionChoice(grams: count * pieceWeight, pieces: count, pieceWeight: pieceWeight),
+                    );
+                  }
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    void showError(String message) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a portion between 1 and 5000 g.'), backgroundColor: AppColors.error),
+        SnackBar(content: Text(message), backgroundColor: AppColors.error),
       );
+    }
+
+    final notifier = ref.read(foodScannerProvider.notifier);
+    final pieces = choice.pieces;
+    if (pieces != null) {
+      final weight = choice.pieceWeight ?? 0;
+      if (pieces < 1 || pieces > 1000 || pieces != pieces.roundToDouble() || weight <= 0 || choice.grams > 5000) {
+        showError('Enter a whole number of pieces and the weight of one piece (total up to 5000 g).');
+        return;
+      }
+      notifier.setItemPieces(item.id, pieces.round(), pieceWeightG: pieceWeightLocked ? null : weight);
       return;
     }
-    ref.read(foodScannerProvider.notifier).updateItemPortion(item.id, value);
+    if (choice.grams <= 0 || choice.grams > 5000) {
+      showError('Enter a portion between 1 and 5000 g.');
+      return;
+    }
+    notifier.updateItemPortion(item.id, choice.grams);
   }
 
   /// Manual correction: pick a food from the built-in list to add it, or to
@@ -598,4 +927,13 @@ class _FoodRecognitionResultsScreenState
       ],
     );
   }
+}
+
+/// Result of the portion dialog.
+class _PortionChoice {
+  final double grams;
+  final double? pieces;
+  final double? pieceWeight;
+
+  const _PortionChoice({required this.grams, this.pieces, this.pieceWeight});
 }

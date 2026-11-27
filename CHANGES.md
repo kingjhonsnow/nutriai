@@ -1,5 +1,20 @@
 # What changed (version 1.1.0)
 
+## Update 2026-11-27: packaged products and counting by pieces
+
+* The AI recognises packaged products (biscuits, chips, chocolate, yogurt...) and reads the
+  brand, net weight, number of pieces and, when readable, the nutrition table on the pack
+  (used before USDA). Countable foods get the weight of one piece.
+* Results screen: "Packaged product: how much did you eat?" card with pack weight, pieces in
+  the pack, pieces eaten (minus/plus) and quick shares (quarter, half, three quarters, whole
+  pack). Only the eaten amount goes into the diary, named for example
+  "Saida Tom Pouce biscuits (3 of 12 pieces)".
+* Portion dialog: Grams or Pieces (pieces eaten x weight of one piece) for any food.
+* Files: `supabase/functions/analyze-food/index.ts`, `lib/core/services/ai_food_service.dart`,
+  `lib/features/food_scanner/providers/food_scanner_provider.dart`,
+  `lib/features/food_scanner/screens/food_recognition_results_screen.dart`,
+  `test/pack_portion_test.dart`.
+
 ## Update 2026-11-27: admin activity view, iPhone display fix, form messages
 
 * Admin activity view: today's usage on every user card (opens, minutes, foods logged,

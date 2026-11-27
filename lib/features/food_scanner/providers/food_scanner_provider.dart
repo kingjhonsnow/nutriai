@@ -97,12 +97,75 @@ class FoodScannerNotifier extends StateNotifier<FoodScannerState> {
     );
   }
 
-  void updateItemPortion(String itemId, double newWeightGrams) {
+  void _updateItem(String itemId, DetectedFoodItem Function(DetectedFoodItem item) change) {
     final current = state.result;
     if (current == null) return;
-    _setItems(current.detectedItems
-        .map((item) => item.id == itemId ? item.copyWith(estimatedWeightGrams: newWeightGrams) : item)
-        .toList());
+    _setItems(current.detectedItems.map((item) => item.id == itemId ? change(item) : item).toList());
+  }
+
+  static double _validGrams(double grams) => grams.clamp(1.0, 5000.0).toDouble();
+
+  /// Portion set in grams (slider or typed): no longer counted in pieces.
+  void updateItemPortion(String itemId, double newWeightGrams) {
+    _updateItem(
+      itemId,
+      (item) => item.copyWith(estimatedWeightGrams: _validGrams(newWeightGrams), clearPieceCount: true),
+    );
+  }
+
+  /// Portion counted in pieces. [pieceWeightG] is needed when the weight of
+  /// one piece is not known yet (typed by the user).
+  void setItemPieces(String itemId, int count, {double? pieceWeightG}) {
+    _updateItem(itemId, (item) {
+      final usePack = item.isPackaged && item.piecesPerPackage != null && item.packageWeightG != null;
+      final weight = usePack ? item.effectivePieceWeightG : (pieceWeightG ?? item.pieceWeightG);
+      if (weight == null || weight <= 0 || count < 1) return item;
+      return item.copyWith(
+        estimatedWeightGrams: _validGrams(weight * count),
+        pieceCount: count,
+        pieceWeightG: usePack ? null : weight,
+      );
+    });
+  }
+
+  /// Quick portion for packs: a quarter, half, three quarters or the whole pack.
+  void setPackFraction(String itemId, double fraction) {
+    _updateItem(itemId, (item) {
+      final weight = item.packageWeightG;
+      if (weight == null || weight <= 0) return item;
+      final pieces = item.piecesPerPackage;
+      if (pieces != null && pieces > 0) {
+        final count = (pieces * fraction).round().clamp(1, pieces * 5).toInt();
+        if ((count - pieces * fraction).abs() < 0.01) {
+          return item.copyWith(estimatedWeightGrams: _validGrams(weight / pieces * count), pieceCount: count);
+        }
+      }
+      return item.copyWith(estimatedWeightGrams: _validGrams(weight * fraction), clearPieceCount: true);
+    });
+  }
+
+  /// The user corrected the pack weight and/or the number of pieces in it.
+  /// Keeps what was eaten: the same number of pieces, or the same share of the pack.
+  void updatePackInfo(String itemId, {double? packageWeightG, int? piecesPerPackage}) {
+    _updateItem(itemId, (item) {
+      final oldWeight = item.packageWeightG;
+      final newWeight = packageWeightG ?? oldWeight;
+      final newPieces = piecesPerPackage ?? item.piecesPerPackage;
+      var updated = item.copyWith(packageWeightG: newWeight, piecesPerPackage: newPieces);
+      if (newWeight == null || newWeight <= 0) return updated;
+
+      final count = item.pieceCount;
+      if (count != null && newPieces != null && newPieces > 0) {
+        final kept = count.clamp(1, newPieces * 5).toInt();
+        return updated.copyWith(estimatedWeightGrams: _validGrams(newWeight / newPieces * kept), pieceCount: kept);
+      }
+      final share = (oldWeight != null && oldWeight > 0) ? item.estimatedWeightGrams / oldWeight : 1.0;
+      updated = updated.copyWith(estimatedWeightGrams: _validGrams(newWeight * share));
+      if (newPieces != null && newPieces > 0 && (share - 1).abs() < 0.02) {
+        updated = updated.copyWith(pieceCount: newPieces); // whole pack = all pieces
+      }
+      return updated;
+    });
   }
 
   void removeItem(String itemId) {
@@ -151,7 +214,7 @@ class FoodScannerNotifier extends StateNotifier<FoodScannerState> {
         date: DateTime.now(),
         mealType: state.selectedMealType,
         items: result.detectedItems
-            .map((i) => FoodLogInput(i.matchedFood.copyWith(name: i.name), i.estimatedWeightGrams, source: i.source))
+            .map((i) => FoodLogInput(i.matchedFood.copyWith(name: i.diaryName), i.estimatedWeightGrams, source: i.source))
             .toList(),
       );
     } catch (e) {
@@ -164,7 +227,7 @@ class FoodScannerNotifier extends StateNotifier<FoodScannerState> {
       await db.saveScanHistory(
         detectedItems: result.detectedItems
             .map((i) => {
-                  'name': i.name,
+                  'name': i.diaryName,
                   'weight_g': i.estimatedWeightGrams,
                   'calories': i.calories,
                   'protein': i.protein,

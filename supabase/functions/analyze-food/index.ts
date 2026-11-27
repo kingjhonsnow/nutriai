@@ -7,8 +7,11 @@
 //      for structured JSON: every food, its estimated weight in grams, confidence.
 //   3. Looks up nutrition per 100 g for every food:
 //        a) NutriAI Tunisian dishes table (for Tunisian dishes),
-//        b) USDA FoodData Central (official US food composition database),
-//        c) the AI's own estimate only when neither has a reliable match.
+//        b) the nutrition table printed on the pack, when the AI can read it,
+//        c) USDA FoodData Central (official US food composition database),
+//        d) the AI's own estimate only when none of these has a reliable match.
+//      Packaged products also return the pack weight and number of pieces, and
+//      countable foods the weight of one piece, so the app can count by pieces.
 //      Each item says which source was used.
 //
 // Secrets (Supabase > Edge Functions > Secrets). API keys never reach the app.
@@ -42,6 +45,14 @@ export type Per100g = {
   sugar: number;
 };
 
+export type PackageInfo = {
+  isPackaged: boolean;
+  brand: string | null;
+  netWeightG: number | null;
+  pieces: number | null;
+  label: Per100g | null; // values read from the pack's nutrition table
+};
+
 export type AiFood = {
   name: string;
   usdaQuery: string;
@@ -49,17 +60,24 @@ export type AiFood = {
   confidence: number;
   isTunisianDish: boolean;
   estimate: Per100g | null;
+  pieceWeightG?: number | null;
+  package?: PackageInfo;
 };
 
 export type ResultItem = {
   name: string;
   estimated_weight_grams: number;
   confidence: number;
-  source: "tunisian_table" | "usda" | "ai_estimate";
+  source: "tunisian_table" | "package_label" | "usda" | "ai_estimate";
   source_label: string;
   fdc_id: number | null;
   matched_description: string | null;
   per_100g: Per100g;
+  is_packaged: boolean;
+  brand: string | null;
+  package_weight_g: number | null;
+  pieces_per_package: number | null;
+  piece_weight_g: number | null;
 };
 
 export class HttpError extends Error {
@@ -88,7 +106,13 @@ Respond with ONLY a JSON object of this exact shape:
       "carbs_per_100g": 0,
       "fat_per_100g": 3.6,
       "fiber_per_100g": 0,
-      "sugar_per_100g": 0
+      "sugar_per_100g": 0,
+      "piece_weight_g": null,
+      "is_packaged": false,
+      "brand": null,
+      "package_net_weight_g": null,
+      "pieces_per_package": null,
+      "label_per_100g": null
     }
   ],
   "notes": "short description of the plate"
@@ -108,6 +132,23 @@ Rules:
 - "confidence" is between 0 and 1.
 - The *_per_100g values are your best estimate; they are only used when no database
   match exists.
+- "piece_weight_g": for foods eaten in countable pieces (eggs, dates, biscuits, cookies,
+  fruits, bread slices, meatballs, brik, pastries...), the typical weight of ONE piece in
+  grams. Otherwise null.
+- Packaged products (biscuits, cookies, wafers, cakes, chips, chocolate bars, yogurt pots,
+  cans, juice or milk cartons...) shown in or with their packaging: set "is_packaged": true,
+  "brand" to the brand if readable (for example "Saida", "Bachkoutou"), and put brand and
+  product in "name" (for example "Saida Tom Pouce biscuits").
+  * "package_net_weight_g": the net weight printed on the pack, in grams (use ml as grams
+    for drinks). If it is not readable, your best estimate of that pack size, or null.
+  * "pieces_per_package": the number of pieces, biscuits or bars in the pack if printed or
+    clearly countable, otherwise null.
+  * "estimated_weight_grams": the full net weight of the pack. The user will say how much
+    of it they ate.
+  * "label_per_100g": ONLY if the nutrition table is clearly readable in the photo:
+    {"calories": .., "protein": .., "carbs": .., "fat": .., "fiber": .., "sugar": ..} per
+    100 g (convert from per serving using the serving size if needed). Otherwise null.
+    Never guess these values.
 - Never invent foods that are not visible. Drinks count only if clearly visible.
 - If there is no food in the photo, return {"foods": [], "notes": "No food detected."}`;
 
@@ -186,6 +227,46 @@ export function extractJsonObject(raw: string): Record<string, unknown> {
   }
 }
 
+/** Reads the nutrition table values the AI copied from a pack, or null if they look wrong. */
+export function parseLabel(raw: unknown): Per100g | null {
+  if (!raw || typeof raw !== "object") return null;
+  const l = raw as Record<string, unknown>;
+  const calories = num(l.calories);
+  if (calories === null || calories <= 0 || calories > 900) return null;
+  const protein = clamp(num(l.protein) ?? 0, 0, 100);
+  const carbs = clamp(num(l.carbs) ?? 0, 0, 100);
+  const fat = clamp(num(l.fat) ?? 0, 0, 100);
+  if (protein + carbs + fat > 105) return null;
+  const fromMacros = protein * 4 + carbs * 4 + fat * 9;
+  if (fromMacros > 0) {
+    const ratio = calories / fromMacros;
+    if (ratio < 0.6 || ratio > 1.6) return null; // misread label
+  }
+  return {
+    calories,
+    protein,
+    carbs,
+    fat,
+    fiber: clamp(num(l.fiber) ?? 0, 0, 100),
+    sugar: clamp(num(l.sugar) ?? 0, 0, 100),
+  };
+}
+
+export function parsePackage(f: Record<string, unknown>): PackageInfo {
+  const isPackaged = f.is_packaged === true;
+  if (!isPackaged) return { isPackaged: false, brand: null, netWeightG: null, pieces: null, label: null };
+  const brand = typeof f.brand === "string" ? f.brand.trim().slice(0, 40) : "";
+  const net = num(f.package_net_weight_g);
+  const pieces = num(f.pieces_per_package);
+  return {
+    isPackaged: true,
+    brand: brand || null,
+    netWeightG: net !== null && net >= 5 && net <= 5000 ? Math.round(net) : null,
+    pieces: pieces !== null && pieces >= 1 && pieces <= 200 ? Math.round(pieces) : null,
+    label: parseLabel(f.label_per_100g),
+  };
+}
+
 export function parseAiFoods(obj: Record<string, unknown>): { foods: AiFood[]; notes: string } {
   const list = Array.isArray(obj.foods) ? obj.foods : [];
   const foods: AiFood[] = [];
@@ -210,13 +291,21 @@ export function parseAiFoods(obj: Record<string, unknown>): { foods: AiFood[]; n
         sugar: clamp(num(f.sugar_per_100g) ?? 0, 0, 100),
       };
     }
+    const pack = parsePackage(f);
+    const pieceWeight = num(f.piece_weight_g);
+    let finalGrams = clamp(Math.round(grams ?? 100), 5, 2000);
+    if (pack.isPackaged && pack.netWeightG !== null) finalGrams = pack.netWeightG; // whole pack by default
     foods.push({
       name: name.slice(0, 80),
       usdaQuery: String(f.usda_query ?? name).trim().slice(0, 80) || name,
-      grams: clamp(Math.round(grams ?? 100), 5, 2000),
+      grams: finalGrams,
       confidence: clamp(num(f.confidence) ?? 0.7, 0, 1),
       isTunisianDish: f.is_tunisian_dish === true,
       estimate,
+      pieceWeightG: pieceWeight !== null && pieceWeight >= 1 && pieceWeight <= 1000
+        ? Math.round(pieceWeight * 10) / 10
+        : null,
+      package: pack,
     });
   }
   const notes = typeof obj.notes === "string" ? obj.notes.slice(0, 300) : "";
@@ -320,10 +409,18 @@ export async function enrichItem(
   food: AiFood,
   usdaSearch: (q: string) => Promise<UsdaFood[]> = searchUsda,
 ): Promise<{ item: ResultItem; usdaFailed: boolean }> {
+  const pack = food.package;
   const base = {
     name: food.name,
     estimated_weight_grams: food.grams,
     confidence: Math.round(food.confidence * 100) / 100,
+    is_packaged: pack?.isPackaged === true,
+    brand: pack?.brand ?? null,
+    package_weight_g: pack?.netWeightG ?? null,
+    pieces_per_package: pack?.pieces ?? null,
+    piece_weight_g: pack?.isPackaged && pack.netWeightG !== null && pack.pieces !== null
+      ? Math.round((pack.netWeightG / pack.pieces) * 10) / 10
+      : food.pieceWeightG ?? null,
   };
 
   const dish = matchTunisianDish(food.name, food.isTunisianDish);
@@ -331,6 +428,14 @@ export async function enrichItem(
     return {
       item: { ...base, source: "tunisian_table", source_label: "NutriAI Tunisian dishes table",
         fdc_id: null, matched_description: dish.name, per_100g: dish.per100g },
+      usdaFailed: false,
+    };
+  }
+
+  if (pack?.isPackaged && pack.label) {
+    return {
+      item: { ...base, source: "package_label", source_label: "Nutrition label on the pack",
+        fdc_id: null, matched_description: null, per_100g: pack.label },
       usdaFailed: false,
     };
   }

@@ -15,8 +15,21 @@ class DetectedFoodItem {
   FoodItem matchedFood;
 
   /// Where the nutrition values come from: 'usda', 'tunisian_table',
-  /// 'ai_estimate' or 'manual'.
+  /// 'package_label', 'ai_estimate' or 'manual'.
   final String source;
+
+  /// Packaged product (biscuits, chips, yogurt...): pack net weight and pieces,
+  /// read from the pack by the AI when visible, editable by the user.
+  final bool isPackaged;
+  final String? brand;
+  final double? packageWeightG;
+  final int? piecesPerPackage;
+
+  /// Weight of one piece for countable foods (eggs, dates, biscuits...).
+  final double? pieceWeightG;
+
+  /// Pieces eaten when the portion was set by pieces; null when set in grams.
+  final int? pieceCount;
 
   DetectedFoodItem({
     required this.id,
@@ -25,7 +38,45 @@ class DetectedFoodItem {
     required this.confidence,
     required this.matchedFood,
     this.source = 'manual',
+    this.isPackaged = false,
+    this.brand,
+    this.packageWeightG,
+    this.piecesPerPackage,
+    this.pieceWeightG,
+    this.pieceCount,
   });
+
+  /// Weight of one piece: pack weight / pieces for packs, otherwise the estimate.
+  double? get effectivePieceWeightG {
+    final w = packageWeightG;
+    final p = piecesPerPackage;
+    if (isPackaged && w != null && p != null && p > 0) return w / p;
+    return pieceWeightG;
+  }
+
+  /// How much was eaten, in words, e.g. "3 of 12 pieces" or "half a pack".
+  String? get portionNote {
+    final count = pieceCount;
+    if (count != null) {
+      if (isPackaged && piecesPerPackage != null) return '$count of $piecesPerPackage pieces';
+      return count == 1 ? '1 piece' : '$count pieces';
+    }
+    final w = packageWeightG;
+    if (isPackaged && w != null && w > 0) {
+      final f = estimatedWeightGrams / w;
+      if ((f - 1).abs() < 0.02) return 'whole pack';
+      if ((f - 0.5).abs() < 0.02) return 'half a pack';
+      if ((f - 0.25).abs() < 0.02) return 'a quarter of the pack';
+      if ((f - 0.75).abs() < 0.02) return 'three quarters of the pack';
+    }
+    return null;
+  }
+
+  /// Name saved in the diary, with the portion when known.
+  String get diaryName {
+    final note = portionNote;
+    return note == null ? name : '$name ($note)';
+  }
 
   double get calories => matchedFood.getCaloriesFor(estimatedWeightGrams);
   double get protein => matchedFood.getProteinFor(estimatedWeightGrams);
@@ -43,6 +94,11 @@ class DetectedFoodItem {
     double? confidence,
     FoodItem? matchedFood,
     String? source,
+    double? packageWeightG,
+    int? piecesPerPackage,
+    double? pieceWeightG,
+    int? pieceCount,
+    bool clearPieceCount = false,
   }) {
     return DetectedFoodItem(
       id: id,
@@ -51,6 +107,12 @@ class DetectedFoodItem {
       confidence: confidence ?? this.confidence,
       matchedFood: matchedFood ?? this.matchedFood,
       source: source ?? this.source,
+      isPackaged: isPackaged,
+      brand: brand,
+      packageWeightG: packageWeightG ?? this.packageWeightG,
+      piecesPerPackage: piecesPerPackage ?? this.piecesPerPackage,
+      pieceWeightG: pieceWeightG ?? this.pieceWeightG,
+      pieceCount: clearPieceCount ? null : (pieceCount ?? this.pieceCount),
     );
   }
 }
@@ -134,7 +196,12 @@ class AIFoodService {
       final name = (item['name'] as String?)?.trim().isNotEmpty == true ? item['name'] as String : 'Food';
       final source = (item['source'] as String?) ?? 'ai_estimate';
       final fdcId = item['fdc_id'];
-      final grams = n(item['estimated_weight_grams']).clamp(5.0, 2000.0).toDouble();
+      final grams = n(item['estimated_weight_grams']).clamp(5.0, 5000.0).toDouble();
+      double? optional(Object? v) => (v is num && v > 0) ? v.toDouble() : null;
+      final isPackaged = item['is_packaged'] == true;
+      final packWeight = isPackaged ? optional(item['package_weight_g']) : null;
+      final packPieces = isPackaged ? optional(item['pieces_per_package'])?.round() : null;
+      final brand = (item['brand'] as String?)?.trim();
 
       final food = FoodItem(
         id: fdcId is num ? 'usda_${fdcId.toInt()}' : 'scan_${now.millisecondsSinceEpoch}_$i',
@@ -156,6 +223,13 @@ class AIFoodService {
         confidence: n(item['confidence']).clamp(0.0, 1.0).toDouble(),
         matchedFood: food,
         source: source,
+        isPackaged: isPackaged,
+        brand: (brand == null || brand.isEmpty) ? null : brand,
+        packageWeightG: packWeight,
+        piecesPerPackage: packPieces,
+        pieceWeightG: optional(item['piece_weight_g']),
+        // A pack starts as "whole pack": all pieces eaten.
+        pieceCount: (packPieces != null && packWeight != null && (grams - packWeight).abs() < 1) ? packPieces : null,
       ));
     }
 
