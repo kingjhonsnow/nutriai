@@ -5,6 +5,7 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="NutriAI: private AI nutrition and fitness tracker">
   <meta name="theme-color" content="#0D1117">
@@ -22,11 +23,18 @@
   <title>NutriAI</title>
 
   <style>
+    html {
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
     html, body {
       margin: 0;
+      width: 100%;
       height: 100%;
+      overflow: hidden;
       background: #0D1117;
       overscroll-behavior: none;
+      touch-action: manipulation; /* no double-tap zoom */
     }
     #splash {
       position: fixed;
@@ -69,6 +77,60 @@
       font-weight: 600;
     }
   </style>
+
+  <script>
+    // Phone display fix (iPhone): Flutter replaces the viewport tag with one that
+    // allows zooming (maximum-scale=5). Safari then zooms in when a text field is
+    // tapped and stays zoomed, so the app looks too big and is cut off on the right.
+    // This keeps every screen at 100% on all phones, and undoes any zoom that
+    // still happens (keyboard closing, rotation).
+    (function () {
+      var LOCK = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+      var LOCK_ALT = LOCK + ', minimum-scale=1.0';
+
+      function viewportTags() {
+        return document.querySelectorAll('meta[name="viewport"]');
+      }
+
+      function lockViewport() {
+        var tags = viewportTags();
+        for (var i = 0; i < tags.length; i++) {
+          var c = tags[i].getAttribute('content');
+          if (c !== LOCK && c !== LOCK_ALT) tags[i].setAttribute('content', LOCK);
+        }
+      }
+
+      function resetZoom() {
+        var vv = window.visualViewport;
+        if (!vv || vv.scale <= 1.01) return;
+        var tags = viewportTags();
+        for (var i = 0; i < tags.length; i++) {
+          // Changing the tag makes Safari recalculate the page and return to 100%.
+          tags[i].setAttribute('content', tags[i].getAttribute('content') === LOCK ? LOCK_ALT : LOCK);
+        }
+        window.scrollTo(0, 0);
+      }
+
+      function later(fn, ms) {
+        return function () { setTimeout(fn, ms); };
+      }
+
+      lockViewport();
+      if (window.MutationObserver) {
+        new MutationObserver(lockViewport).observe(document.head, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['content']
+        });
+      }
+      document.addEventListener('focusout', later(resetZoom, 300), true);
+      window.addEventListener('orientationchange', later(resetZoom, 500));
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', later(resetZoom, 300));
+      }
+    })();
+  </script>
 </head>
 <body>
   <div id="splash">

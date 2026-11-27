@@ -20,6 +20,8 @@ class RegisterScreen extends ConsumerStatefulWidget {
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
+  // Errors show only after the first submit, then update live while typing.
+  AutovalidateMode _autovalidate = AutovalidateMode.disabled;
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -134,7 +136,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _autovalidate = AutovalidateMode.onUserInteraction);
+      return;
+    }
 
     if (!_acceptedTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -186,6 +192,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
             child: Form(
               key: _formKey,
+              autovalidateMode: _autovalidate,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

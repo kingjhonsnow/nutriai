@@ -21,6 +21,8 @@ class AddMeasurementScreen extends ConsumerStatefulWidget {
 
 class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
   final _formKey = GlobalKey<FormState>();
+  // Errors show only after the first submit, then update live while typing.
+  AutovalidateMode _autovalidate = AutovalidateMode.disabled;
   bool _saving = false;
   final _weightController = TextEditingController();
   final _bodyFatController = TextEditingController();
@@ -45,7 +47,11 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
   }
 
   Future<void> _saveMeasurement() async {
-    if (!_formKey.currentState!.validate()) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _autovalidate = AutovalidateMode.onUserInteraction);
+      return;
+    }
 
     double? parse(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.').trim());
     final weight = parse(_weightController);
@@ -117,6 +123,7 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
           padding: const EdgeInsets.all(24.0),
           child: Form(
             key: _formKey,
+            autovalidateMode: _autovalidate,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

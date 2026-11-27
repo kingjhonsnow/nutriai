@@ -17,6 +17,8 @@ class SetNewPasswordScreen extends ConsumerStatefulWidget {
 
 class _SetNewPasswordScreenState extends ConsumerState<SetNewPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
+  // Errors show only after the first submit, then update live while typing.
+  AutovalidateMode _autovalidate = AutovalidateMode.disabled;
   final _passwordController = TextEditingController();
   bool _obscure = true;
 
@@ -27,7 +29,11 @@ class _SetNewPasswordScreenState extends ConsumerState<SetNewPasswordScreen> {
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _autovalidate = AutovalidateMode.onUserInteraction);
+      return;
+    }
     final ok = await ref.read(authProvider.notifier).setNewPassword(_passwordController.text);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -47,6 +53,7 @@ class _SetNewPasswordScreenState extends ConsumerState<SetNewPasswordScreen> {
           padding: const EdgeInsets.all(24),
           child: Form(
             key: _formKey,
+            autovalidateMode: _autovalidate,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

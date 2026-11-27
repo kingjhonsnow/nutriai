@@ -20,6 +20,8 @@ class ForgotPasswordScreen extends ConsumerStatefulWidget {
 
 class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
+  // Errors show only after the first submit, then update live while typing.
+  AutovalidateMode _autovalidate = AutovalidateMode.disabled;
   final _emailController = TextEditingController();
   final _codeController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -56,7 +58,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   }
 
   Future<void> _resetPassword() async {
-    if (!_formKey.currentState!.validate()) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _autovalidate = AutovalidateMode.onUserInteraction);
+      return;
+    }
     final ok = await ref.read(authProvider.notifier).resetPasswordWithCode(
           _emailController.text.trim(),
           _codeController.text.trim(),
@@ -88,6 +94,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
           padding: const EdgeInsets.all(24),
           child: Form(
             key: _formKey,
+            autovalidateMode: _autovalidate,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

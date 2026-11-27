@@ -18,6 +18,8 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  // Errors show only after the first submit, then update live while typing.
+  AutovalidateMode _autovalidate = AutovalidateMode.disabled;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -31,7 +33,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _autovalidate = AutovalidateMode.onUserInteraction);
+      return;
+    }
 
     final auth = ref.read(authProvider.notifier);
     final email = _emailController.text.trim();
@@ -63,6 +69,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
             child: Form(
               key: _formKey,
+              autovalidateMode: _autovalidate,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
